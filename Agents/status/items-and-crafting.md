@@ -9,6 +9,12 @@ Part of [Status](../Status.md); what to build next in this area is in
   client crashes until the instance expires; ids from 0x100000; one pickup per item.
   Code: `InstanceStore.cs`, Gateway.
   Docs: [13](../docs/protocol/13-items.md) §5.
+- Loot pet (dev): a pet cosmetic worn in one of the Cosmetics tab's Pet slots (18, 19) takes valuable currency
+  (`Items.ValuableCurrency`: Chaos Orb and better, plus Chromatic Orbs and Gemcutter's Prisms) off the ground within 60 cells into the main inventory, with the
+  same update messages a click's pickup sends (`Items.PetPickUp`, `RunPlayerTick`). Other ground items and cheap
+  currency are left alone; with no room in the inventory the currency stays on the ground.
+  Checked live 2026-11-04: a dropped Chaos Orb stack entered the inventory 0.16 s later and a dropped Scroll of Wisdom
+  stayed; the Celestial Cat pet spawned and the connection stayed up through the module reload.
 - Life and mana flasks: a flask key (C→S 0x70) spends the flask's charges and recovers Flasks.dat's life or mana over
   its time in the shared 16 ms recovery loop, the orb rising by +1, with the flask_effect buff.
   Quality, the flask's prefixes and suffixes and the character's flask stats count (amount, rate, instant and partial
