@@ -72,6 +72,12 @@ $manifest = @(
     @{ Name = 'stat-descriptions'; Outputs = @('data\stat-descriptions.txt'); Runner = 'dotnet'
        Args = @('run', '--project', 'scripts/re/game-pack', '--', 'stat-descriptions'); Version = 1; Needs = @()
        UsedBy = 'the mod wording of the Gateway''s crafter mode, for tools such as the launcher''s item crafter (item-crafter.md)' }
+    # The client's Chinese pack: its item class, base and affix names, rare-name words and modifier wording, which the
+    # Gateway's crafter mode sends beside the English text. Wholly from the GGPK (no other entry needed), and whatever
+    # the installed client's pack holds: a client without one writes empty files, and tools then show English.
+    @{ Name = 'localized'; Outputs = @('data\localized\zh-CN.json', 'data\localized\zh-CN-stat-descriptions.txt'); Runner = 'dotnet'
+       Args = @('run', '--project', 'scripts/re/game-pack', '--', 'localize', 'Client/Content.ggpk', 'traditional chinese', 'Traditional Chinese', 'zh-CN', 'data/localized/zh-CN.json', 'data/localized/zh-CN-stat-descriptions.txt'); Version = 1; Needs = @()
+       UsedBy = 'the client''s translated item names and modifier wording, which the Gateway''s crafter mode sends beside the English ones (item-crafter.md)' }
 )
 
 function Need($ok, $message) { if (-not $ok) { throw "setup incomplete: $message (see Agents/GettingStarted.md)" } }

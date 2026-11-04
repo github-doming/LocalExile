@@ -27,11 +27,17 @@ static class ItemCrafter
     /// names), "base" (with its pools: affixes, per influence, crafted, corruption and Eldritch implicits), "desc" (the
     /// stat descriptions of those mods' stats) and "word" (rare name words, lists 1 and 2). Affix pools are
     /// <see cref="ItemRolls.Pool(ItemCatalog.BaseType, int, ItemInfluence)"/> at item level 100: a tool hides what
-    /// needs a higher item level by each mod's "level".
+    /// needs a higher item level by each mod's "level". A checkout whose client has a Chinese pack also has the names
+    /// translated (<see cref="CrafterLocalization"/>): a "locale" line names their language, and each class, base, mod,
+    /// word and stat description keeps its English field and gains the translated one beside it.
     /// </summary>
+    /// <param name="localization">The checkout's translated names; null to load them from <paramref name="folder"/>.</param>
     public static IEnumerable<JsonObject> Catalog(ItemCatalog items, ItemRolls rolls, BenchCrafting bench, StatDescriptions descriptions,
-        string folder = "data")
+        string folder = "data", CrafterLocalization? localization = null)
     {
+        localization ??= CrafterLocalization.Load(folder);
+        if (localization is { Tag.Length: > 0 } translated)
+            yield return new JsonObject { ["type"] = "locale", ["tag"] = translated.Tag };
         var classNames = LoadClassNames(folder);
         var bases = items.All.Where(t => Craftable(items, t)).ToList();
         var pools = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -91,14 +97,15 @@ static class ItemCrafter
                 ["implicits"] = new JsonArray([.. (t.Implicits ?? []).Select(m => { mods.TryAdd(m.Id, m); return JsonValue.Create(m.Id); })]),
             };
             foreach (var (key, value) in shared) line[key] = value?.DeepClone();
-            baseLines.Add(line);
+            baseLines.Add(Localized(line, "nameLocalized", localization?.Base(t.Id)));
         }
 
         foreach (var c in bases.Select(t => t.Class).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
-            yield return new JsonObject { ["type"] = "class", ["id"] = c, ["name"] = classNames.GetValueOrDefault(c, c) };
+            yield return Localized(new JsonObject { ["type"] = "class", ["id"] = c, ["name"] = classNames.GetValueOrDefault(c, c) },
+                "nameLocalized", localization?.Class(c));
         foreach (var p in poolLines) yield return p;
         foreach (var m in mods.Values.OrderBy(m => m.Row))
-            yield return new JsonObject
+            yield return Localized(new JsonObject
             {
                 ["type"] = "mod",
                 ["id"] = m.Id,
@@ -112,24 +119,35 @@ static class ItemCrafter
                 {
                     ["id"] = s.Id, ["min"] = m.RangeAt(i).Min, ["max"] = m.RangeAt(i).Max,
                 })]),
-            };
+            }, "nameLocalized", localization?.Mod(m.Id));
         foreach (var b in baseLines) yield return b;
         var described = new HashSet<StatDescriptions.Description>(ReferenceEqualityComparer.Instance);
         foreach (var stat in mods.Values.SelectMany(m => m.Stats).Select(s => s.Id).Distinct(StringComparer.Ordinal))
             if (descriptions.For(stat) is { } d && described.Add(d))
+            {
+                var texts = descriptions.Translations(d);
                 yield return new JsonObject
                 {
                     ["type"] = "desc",
                     ["stats"] = new JsonArray([.. d.Stats.Select(s => JsonValue.Create(s))]),
-                    ["variants"] = new JsonArray([.. d.Variants.Select(v => (JsonNode)new JsonObject
+                    ["variants"] = new JsonArray([.. d.Variants.Select((v, i) => (JsonNode)Localized(new JsonObject
                     {
                         ["when"] = new JsonArray([.. v.Conditions.Select(c => JsonValue.Create(c))]),
                         ["text"] = v.Text,
                         ["handlers"] = new JsonArray([.. v.Handlers.Select(h => (JsonNode)new JsonArray(h.Name, h.Stat))]),
-                    })]),
+                    }, "textLocalized", texts?[i]))]),
                 };
+            }
         foreach (var w in rolls.Words.Where(w => w.List is 1 or 2))
-            yield return new JsonObject { ["type"] = "word", ["list"] = w.List, ["key"] = w.Key, ["text"] = w.Text };
+            yield return Localized(new JsonObject { ["type"] = "word", ["list"] = w.List, ["key"] = w.Key, ["text"] = w.Text },
+                "textLocalized", localization?.Word(w.Key));
+    }
+
+    /// <summary>The line with the checkout's translated text, when it has one; a tool falls back to the English field.</summary>
+    static JsonObject Localized(JsonObject line, string field, string? text)
+    {
+        if (text is { Length: > 0 }) line[field] = text;
+        return line;
     }
 
     static Dictionary<string, string> LoadClassNames(string folder)
