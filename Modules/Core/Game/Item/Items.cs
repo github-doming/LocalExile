@@ -759,6 +759,77 @@ static partial class Game
 
     internal static bool IsGold(WorldItemObject ground) => Items.ByHash(ground.Item.TypeHash)?.Class == ItemDrops.GoldClass;
 
+    // The loot pet's currency: the orbs worth taking on their own (Chaos Orb and better, plus the league orbs) and,
+    // by request, Chromatic Orbs and Gemcutter's Prisms. Cheap currency, fragments, divination cards on the ground and
+    // equipment are left alone. Ids are BaseItemTypes' (the comment names each one).
+    static readonly HashSet<string> ValuableCurrency =
+    [
+        "Metadata/Items/Currency/CurrencyRerollRare",            // Chaos Orb
+        "Metadata/Items/Currency/CurrencyRerollSocketColours",   // Chromatic Orb
+        "Metadata/Items/Currency/CurrencyGemQuality",            // Gemcutter's Prism
+        "Metadata/Items/Currency/CurrencyAddModToRare",          // Exalted Orb
+        "Metadata/Items/Currency/CurrencyRemoveMod",             // Orb of Annulment
+        "Metadata/Items/Currency/CurrencyModValues",             // Divine Orb
+        "Metadata/Items/Currency/CurrencyDuplicate",             // Mirror of Kalandra
+        "Metadata/Items/Currency/CurrencyFractureRare",          // Fracturing Orb
+        "Metadata/Items/Currency/CurrencyRerollUnique",          // Ancient Orb
+        "Metadata/Items/Currency/CurrencyHinekorasLock",         // Hinekora's Lock
+        "Metadata/Items/Currency/CurrencyMutatedAddModToRare",   // Foulborn Exalted Orb
+        "Metadata/Items/Currency/CurrencyHellscapeModValues",    // Volatile Vaal Orb
+        "Metadata/Items/Currency/CurrencyHellscapeRerollRare",   // Tainted Chaos Orb
+        "Metadata/Items/Currency/CurrencyHellscapeAddModToRare", // Tainted Exalted Orb
+        "Metadata/Items/Currency/CurrencyEldritchRerollRare",    // Eldritch Chaos Orb
+        "Metadata/Items/Currency/CurrencyEldritchAddModToRare",  // Eldritch Exalted Orb
+        "Metadata/Items/Currency/CurrencyEldritchRemoveMod",     // Eldritch Orb of Annulment
+        "Metadata/Items/Currency/CurrencyRerollRareVeiled",      // Veiled Exalted Orb
+        "Metadata/Items/Currency/CurrencyRerollRareVeiledChaos", // Veiled Chaos Orb
+        "Metadata/Items/Currency/CurrencyRerollDefences",        // Sacred Orb
+        "Metadata/Items/Currency/CurrencyAtlasPassiveRefund",    // Orb of Unmaking
+        "Metadata/Items/Currency/CurrencyUpgradeInfluenceMod",   // Orb of Dominance
+        "Metadata/Items/Currency/CurrencyUpgradeMapTier",        // Harbinger's Orb
+        "Metadata/Items/Currency/CurrencyRerollMapType",         // Orb of Horizons
+        "Metadata/Items/Currency/CurrencyAddAtlasModHigh",       // Awakened Sextant
+        "Metadata/Items/Currency/CurrencyAddAtlasModMaven",      // Elevated Sextant
+        "Metadata/Items/AtlasExiles/ApplyInfluence",             // Awakener's Orb
+        "Metadata/Items/DivinationCards/DivinationCardDeck",     // Stacked Deck
+    ];
+
+    /// <summary>A ground item the loot pet takes: one of the valuable currencies, whatever its class.</summary>
+    internal static bool IsValuableCurrency(WorldItemObject ground) =>
+        Items.ByHash(ground.Item.TypeHash) is { } t && ValuableCurrency.Contains(t.Id);
+
+    // The loot pet's pickup: the ground item goes into the main inventory the way a click's pickup puts it, without the
+    // walk or the cursor (RunPlayerTick calls it within a pet radius). With no room it stays on the ground; a partial
+    // stack that could not go in goes back on the ground rather than vanish.
+    internal static async Task PetPickUp(string remote, NetworkStream stream, ConnectionCiphers ciphers, ClientState conn, uint id, WorldItemObject ground)
+    {
+        var items = ItemsOf(conn);
+        PlayerInventories.Stacking stacked;
+        lock (conn.Monsters)
+        {
+            if (HardcoreProgressBlocked(conn)) return;
+            if (!items.Fits(PlayerInventories.MainInventory, ground.Item, ShapeOf))
+            {
+                Console.WriteLine($"[gateway] {remote} loot pet: no room for {ground.Item.StackSize} of 0x{ground.Item.TypeHash:x8}; it stays on the ground");
+                return;
+            }
+            if (conn.Instance.Ground.Take(id) is null) return;   // already picked up
+            stacked = KeepOnGroundIfNotSaved(conn, ground, () => items.AddStacked(PlayerInventories.MainInventory, ground.Item, ShapeOf), id);
+        }
+        if (stacked.Left > 0)
+        {
+            // Fits said yes, so this is not expected; the rest goes back on the ground rather than vanish.
+            var rest = new WorldItemObject(ground.GridX, ground.GridY, ground.Item with { StackSize = (ushort)stacked.Left });
+            uint restId = conn.Instance.Ground.Add(rest);
+            await Send(remote, stream, ciphers, InstanceEntities.CreateObject(restId, InstanceEntities.ObjectTypeHash(WorldItemObject.MetadataPath), rest.Blob()),
+                $"0x02b9 create world item 0x{restId:x} (the rest of 0x{id:x}, the loot pet)");
+        }
+        await Send(remote, stream, ciphers, InstanceProtocol.RemoveObject(id), $"0x02bb world item 0x{id:x} removed (the loot pet)");
+        await Send(remote, stream, ciphers, InstanceItems.InventoryChange(PlayerInventories.InventoryId(PlayerInventories.MainInventory),
+            items.NextRevision(PlayerInventories.MainInventory), stacked.RemovedIds, stacked.AddedItems),
+            $"0x00bf inventory 1: the loot pet picked up {ground.Item.StackSize} of 0x{ground.Item.TypeHash:x8}");
+    }
+
     // Gold goes to the stash's gold of the character's league (S→C 0x2a9), not into the inventory.
     internal static async Task PickUpGold(string remote, NetworkStream stream, ConnectionCiphers ciphers, ClientState conn, uint id, WorldItemObject ground, string how)
     {
