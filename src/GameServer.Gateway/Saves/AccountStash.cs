@@ -305,6 +305,22 @@ sealed partial class AccountStash
         return moved;
     }
 
+    /// <summary>Adds an empty tab of the given StashType at the end (the dev command /stash_new): its button goes last and
+    /// it is saved at once. Returns its index, or null when the type is not one of <see cref="Types"/>.</summary>
+    public int? AddTab(string name, byte type)
+    {
+        if (!Types.TryGetValue(type, out var info)) return null;
+        var (r, g, b) = StarterTabs.FirstOrDefault(t => t.Type == type) is { R: var sr, G: var sg, B: var sb } ? (sr, sg, sb) : ((byte)0x7c, (byte)0x54, (byte)0x36);
+        int index;
+        lock (_lock)
+        {
+            index = _tabs.Count;
+            _tabs.Add(new TabState(new SavedTab(name, type, r, g, b, [], Position: (ushort)Math.Min(index, ushort.MaxValue))));
+        }
+        Persist(index);
+        return index;
+    }
+
     /// <summary>Every tab but the free normal ones (StashType 0) and folders (16) is premium, as bought tabs are in the real
     /// game: the tab settings then offer the name and colour (record flag 0x02).</summary>
     static bool IsPremium(byte type) => type is not (0 or 16);
