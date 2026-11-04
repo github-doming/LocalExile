@@ -28,13 +28,17 @@ using GameServer.Core.Diagnostics;
 // `commands`: one JSON line per chat command ({"name", "usage", "args"}) for tools such as the desktop launcher, then
 // exit; nothing starts. `values <kind>`: what an argument of that kind can be ({"value", "detail"}), from the Gateway's
 // own catalogs. `crafter`: the item crafter's bases, mods and stat descriptions (ItemCrafter.Catalog,
-// Agents/docs/dev/item-crafter.md). Before ServerLog, whose timestamps would break the JSON lines.
+// Agents/docs/dev/item-crafter.md), with the client's translated names beside the English ones when the checkout has
+// them (extract-data.ps1's `localized` entry). Before ServerLog, whose timestamps would break the JSON lines.
 if (args is ["crafter"])
 {
     // The catalogs' own load lines would break the JSON.
     var stdout = Console.Out;
     Console.SetOut(TextWriter.Null);
-    var lines = ItemCrafter.Catalog(Items, Rolls, Bench, StatDescriptions.Load()).Select(l => l.ToJsonString()).ToList();
+    var localization = CrafterLocalization.Load();
+    var descriptions = StatDescriptions.Load();
+    if (localization is { } translated) descriptions.AddTranslations(translated.Descriptions);
+    var lines = ItemCrafter.Catalog(Items, Rolls, Bench, descriptions, localization: localization).Select(l => l.ToJsonString()).ToList();
     Console.SetOut(stdout);
     foreach (string line in lines) Console.WriteLine(line);
     return 0;

@@ -88,4 +88,81 @@ public class ItemCrafterTests
         Assert.Contains(lines, l => (string?)l["type"] == "word" && (int)l["list"]! == 1);
         Assert.DoesNotContain(lines, l => (string?)l["type"] == "base" && items.Find((string)l["id"]!) is { } t && items.Gem(t) is not null);
     }
+
+    [Fact]
+    public void Catalog_offers_the_clients_translated_names_beside_the_English_ones()
+    {
+        var items = new ItemCatalog("data");
+        var rolls = new ItemRolls(items);
+        string folder = Path.Combine(Path.GetTempPath(), $"localexile-localized-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(folder, "localized"));
+        var belt = items.All.First(t => t.Name == "Vanguard Belt");
+        File.WriteAllText(Path.Combine(folder, "localized", "zh-CN.json"), $$$"""
+            {"tag":"zh-CN","classes":{"{{{belt.Class}}}":"腰带"},"bases":{"{{{belt.Id}}}":"先锋腰带"},
+             "mods":{"IncreasedLife7":"丰饶的"},"words":{"4053401100":"不祥"}}
+            """);
+        File.WriteAllText(Path.Combine(folder, "localized", "zh-CN-stat-descriptions.txt"), """
+            description
+            	1 base_maximum_life
+            	1
+            		# "{0:+d} 最大生命"
+            """);
+        // The checkout's English descriptions, paired with the translated ones the way the Gateway's `crafter` mode does.
+        var descriptions = StatDescriptions.Parse("""
+            description
+            	1 base_maximum_life
+            	1
+            		# "{0:+d} to maximum Life"
+            """.Split('\n'));
+        var localization = CrafterLocalization.Load(folder)!;
+        descriptions.AddTranslations(localization.Descriptions);
+
+        var lines = ItemCrafter.Catalog(items, rolls, new BenchCrafting(items, rolls), descriptions, "data", localization).ToList();
+        Assert.Contains(lines, l => (string?)l["type"] == "locale" && (string?)l["tag"] == "zh-CN");
+        Assert.Contains(lines, l => (string?)l["type"] == "class" && (string?)l["id"] == belt.Class && (string?)l["nameLocalized"] == "腰带");
+        var baseLine = lines.Single(l => (string?)l["type"] == "base" && (string?)l["id"] == belt.Id);
+        Assert.Equal(("Vanguard Belt", "先锋腰带"), ((string?)baseLine["name"], (string?)baseLine["nameLocalized"]));
+        Assert.Contains(lines, l => (string?)l["type"] == "mod" && (string?)l["id"] == "IncreasedLife7" && (string?)l["nameLocalized"] == "丰饶的");
+        Assert.Contains(lines, l => (string?)l["type"] == "word" && (string?)l["textLocalized"] == "不祥");
+        var desc = lines.Single(l => (string?)l["type"] == "desc" && l["stats"]!.AsArray().Select(s => (string)s!).SequenceEqual(["base_maximum_life"]));
+        var variant = desc["variants"]![0]!;
+        Assert.Equal(("{0:+d} to maximum Life", "{0:+d} 最大生命"), ((string?)variant["text"], (string?)variant["textLocalized"]));
+
+        // A checkout without the client's translated files — an older one, or one that has not run the extraction — keeps
+        // the English catalog, and so does a client whose pack has no text for a name: the fields are optional.
+        string plain = Path.Combine(folder, "plain");
+        Directory.CreateDirectory(plain);
+        var english = ItemCrafter.Catalog(items, rolls, new BenchCrafting(items, rolls), descriptions, plain).ToList();
+        Assert.DoesNotContain(english, l => (string?)l["type"] == "locale");
+        Assert.DoesNotContain(english, l => l["nameLocalized"] is not null || l["textLocalized"] is not null);
+        Directory.Delete(folder, recursive: true);
+    }
+
+    [Fact]
+    public void A_translated_description_keeps_its_conditions_and_loses_the_clients_markup()
+    {
+        var descriptions = StatDescriptions.Parse("""
+            description
+            	1 base_maximum_life
+            	2
+            		1|# "{0:+d} to maximum Life"
+            		#|-1 "<DA1>{{{0:+d}}} reduced maximum Life" negate 1
+            """.Split('\n'));
+        string folder = Path.Combine(Path.GetTempPath(), $"localexile-localized-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "zh-CN-stat-descriptions.txt"), """
+            description
+            	1 base_maximum_life
+            	2
+            		1|# "{0:+d} 最大生命"
+            		#|-1 "<DA1>{{{0:+d}}} 降低最大生命" negate 1
+            """);
+        descriptions.AddTranslations(Path.Combine(folder, "zh-CN-stat-descriptions.txt"));
+        var life = descriptions.For("base_maximum_life")!;
+        // The client's display markup is drawn, not read: "[A|B]" is B, "<DF1>"/ "<DA1>" pick colours, "{{" and "}}" wrap
+        // the value the client fills in.
+        Assert.Equal(["{0:+d} to maximum Life", "{0:+d} reduced maximum Life"], life.Variants.Select(v => v.Text));
+        Assert.Equal(["{0:+d} 最大生命", "{0:+d} 降低最大生命"], descriptions.Translations(life));
+        Directory.Delete(folder, recursive: true);
+    }
 }

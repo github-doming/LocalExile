@@ -4,7 +4,8 @@ What a tool needs to let a player compose an item and get it in game: the deskto
 server gives the data and makes the item; the tool owns the window, the choices and what it saves.
 
 Code: `src/GameServer.Gateway/Item/ItemCrafter.cs` (catalog and build), `StatDescriptions.cs` (mod wording),
-`Program.cs` (`crafter` mode), `/item_give` in `Modules/Core/Player/Commands/CommandsFeature.cs`.
+`CrafterLocalization.cs` (the client's translated names), `Program.cs` (`crafter` mode), `/item_give` in
+`Modules/Core/Player/Commands/CommandsFeature.cs`.
 Tests: `tests/GameServer.Gateway.Tests/ItemCrafterTests.cs`.
 
 ## The catalog: `GameServer.Gateway crafter`
@@ -14,12 +15,17 @@ exits; nothing starts. Lines that do not start with `{` are not part of it. Abou
 
 | `type` | Fields |
 |---|---|
+| `locale` | `tag` (BCP 47, "zh-CN"): the language of the `*Localized` fields below, first line and only when the checkout has them |
 | `class` | `id` (ItemClasses Id, what a base's `class` names), `name` |
 | `pool` | `id`, `mods` (Mods.dat Ids) |
 | `mod` | `id`, `name` (the affix name: "Virile"), `generation` (Mods.dat GenerationType: 1 prefix, 2 suffix, 3 implicit, 5 corruption, 28/29 Eldritch …), `domain`, `level` (the item level it needs), `families`, `tags`, `stats` (`id`, `min`, `max`: the roll range) |
 | `base` | `id` (BaseItemTypes Id), `name`, `class`, `width`, `height`, `dropLevel`, `requirements` (str, dex, int), `sockets` (the most it can have, 0 for none), `quality` (has the Quality component), `implicits` (mod Ids), and pool ids: `pool` (prefixes and suffixes), `influence` (`shaper` … `warlord`: what each influence adds), `crafted` (the bench's mods for its class), `corrupted`, `eldritch` |
 | `desc` | `stats`, `variants`: `when` (one condition per stat), `text`, `handlers` (`[name, stat]`, stat 1-based) |
 | `word` | `list` (1 prefix, 2 suffix), `key` (Words.dat HASH32, what `/item_give` takes), `text` |
+
+`class`, `base`, `mod`, `word` each take `nameLocalized` or `textLocalized` and a `desc` variant takes `textLocalized`
+when the checkout has the client's translated names (below); the English field stays and a tool falls back to it. They are
+optional, so a tool reading an older Gateway works, and an older tool ignores them.
 
 Bases are the modifiable ones with mods: equipment, flasks, jewels, maps; no gems, stackables or placeholder rows.
 `pool` is `ItemRolls.Pool` at item level 100, the rule drops and currency use (domain, prefix or suffix, a spawn weight
@@ -35,12 +41,26 @@ variant whose every condition holds is the line:
 
 - `#` any value, `5` exactly 5, `1|#` at least 1, `#|-1` at most -1, `1|5` 1 to 5, `!0` anything but 0.
 - In the text, `{0}` (or `{}`, the next one) is the value of stat 1, `{1}` of stat 2; `:+d` adds a plus sign to a
-  positive value. The client's link markup is already gone (`[Physical|Physical Damage]` is `Physical Damage`).
+  positive value. The client's markup is gone: a link (`[Physical|Physical Damage]`) is its text, and its display markup
+  (`<DF1>`, `<AT1>`, `<DA1>` … pick a value's colour, `{{` and `}}` wrap a value the client fills in) is removed here.
 - Handlers change a value before it is shown: `negate`, `divide_by_one_hundred` (and `_2dp`), `per_minute_to_per_second`
   (/60), `milliseconds_to_seconds` (/1000), `divide_by_ten_1dp_if_required`, `locations_to_metres` (/10), `double` …
   Conditions test the value before its handlers.
 
 A range is shown as the client's bench does: each value as `(min-max)` when they differ.
+
+### The client's Chinese names
+
+The client keeps a Chinese pack for the same tables, in `data/traditional chinese/` although its text is Simplified
+Chinese, and the stat descriptions carry a `lang "Traditional Chinese"` block (Simplified text too): the names in
+`itemclasses`, `baseitemtypes`, `mods` and `words` and that block. `extract-data.ps1` entry `localized` writes them as
+`data/localized/zh-CN.json` (Id or HASH32 → name) and `data/localized/zh-CN-stat-descriptions.txt` (the English file's
+format) by `game-pack localize`; both are git-ignored and come from whatever client is installed, so a client without
+that pack writes empty files and nothing changes. `CrafterLocalization` reads them and the catalog sends them as the
+optional `nameLocalized`/`textLocalized` fields, keeping English beside them. Two client quirks: the rare-name words are
+translated in `Words.Text2`, not `Text` (`Text2` is the display column), and `ItemClasses.Name` is translated although the
+schema calls it unlocalized. A translated description is paired with its English one by stats and variant conditions; one
+whose variant count differs is left English.
 
 ## Giving it: `/item_give <JSON>`
 

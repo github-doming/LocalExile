@@ -57,6 +57,8 @@ static class GameDataFiles
         ("data/game-files.zip", "levels the Gateway generates itself, the Phrecia classes' passive graph check"),
         ("data/client-constants.json", "the Gateway does not start without its HNC mask"),
         ("data/stat-descriptions.txt", "mod wording for tools' item crafter (the crafter mode)"),
+        ("data/localized/zh-CN.json", "the client's translated item names for tools' item crafter (the crafter mode shows English)"),
+        ("data/localized/zh-CN-stat-descriptions.txt", "the client's translated mod wording for tools' item crafter (the crafter mode shows English)"),
     ];
 
     public static IEnumerable<(string File, string Feature)> Missing(string root = ".") =>

@@ -103,6 +103,13 @@ the client runs. The bundle index also stores every path (about 1.2 million): `l
 ones (e.g. `dotnet run --project scripts/re/ggdump -- Client/Content.ggpk out list "beachtown_v2/"`). `.ot` files are UTF-16
 with a BOM; `.datc64` files are rows followed by `0xbb×8` and the variable data section.
 
+One translated table set per client language lives in `data/<language>/` (`russian`, `traditional chinese`, …), with the same
+table names and the same `.datc64` layout as the English ones, so `dat-schema` reads them unchanged. The Chinese set says
+`traditional chinese` but its text is Simplified Chinese (the client converts it for a Traditional display with
+`metadata/chinesesimplifiedtotraditional.txt`, a UTF-16 simplified/traditional character-pair table); `Words.Text2` holds the
+translated word where `Words.Text` stays English, and `ItemClasses.Name` is translated although the schema calls it
+unlocalized. `game-pack localize` reads that set for the item crafter (item-crafter.md).
+
 ## 4. Frida through REA (live client)
 
 REA's MCP tools: `start_frida_session` (mode `attach`, `pid`), `load_frida_script` (inline source), `frida_session_status`
