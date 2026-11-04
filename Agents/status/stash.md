@@ -66,6 +66,12 @@ Part of [Status](../Status.md); what to build next in this area is in
   unique maps and inactive tinctures. Repeat filling does not duplicate occupied cells. Seven old catalogue names
   have no matching client collection cell and are reported as unavailable; unique Heist contracts are not generated.
   Legacy items can make the native collected count exceed its current-league denominator.
+- **Dev tab create (`/stash_new <StashType>`).** Adds an empty tab of that StashType at the end of the personal stash
+  (`AccountStash.AddTab`: the starter colours, position last, saved at once), then sends the tab list again (S→C 0x136)
+  and replies with the new tab's index and grid. Type names are `AccountStash.Types` (`CurrencyStash`, `NormalStash`,
+  `PremiumStash`, `QuadStash`, …); an unknown or ambiguous name lists them.
+  Checked live 2026-11-04: a second CurrencyStash tab ("Currency 2", 142 × 4) made the list 21 tabs, and the header
+  plus its own `stash_tabs` row were saved.
 
 ## Partly working
 

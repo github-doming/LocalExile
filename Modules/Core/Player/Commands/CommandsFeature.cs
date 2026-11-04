@@ -463,6 +463,31 @@ static class CommandsFeature
                 (fill.Full > 0 ? $"; {fill.Full} slot(s) already full" : "") +
                 (fill.Skipped > 0 ? $"; {fill.Skipped} type(s) skipped (the server can't create them or has no cell for their slot)" : ""));
         })
+        .Add("stash_new", "/stash_new <StashType> (dev: adds an empty stash tab of that type at the end, e.g. /stash_new CurrencyStash; the type names are StashType rows: NormalStash, PremiumStash, QuadStash, CurrencyStash, …)", async args =>
+        {
+            if (args.Length < 1) throw new ArgumentException("/stash_new <StashType>, e.g. /stash_new CurrencyStash");
+            string wanted = string.Join(' ', args);
+            var matches = AccountStash.Types.Where(kv => kv.Value.Name.Equals(wanted, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (matches.Count == 0)
+                matches = AccountStash.Types.Where(kv => kv.Value.Name.StartsWith(wanted, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (matches.Count != 1)
+            {
+                await conn.Commands!.Reply($"No single StashType \"{wanted}\"; types: " +
+                    string.Join(", ", AccountStash.Types.OrderBy(kv => kv.Key).Select(kv => kv.Value.Name)));
+                return;
+            }
+            var (type, info) = matches[0];
+            var stash = PersonalStashOf(conn);
+            int same = Enumerable.Range(0, stash.Count).Count(i => stash.TabType(i) == type);
+            if (stash.AddTab($"{info.Name.Replace("Stash", "")} {same + 1}", type) is not int tab)
+            {
+                await conn.Commands!.Reply($"The stash did not take a {info.Name} tab");
+                return;
+            }
+            await SendTabListAgain(remote, stream, ciphers, conn, InstanceStash.Personal);
+            var (slot, _) = stash.Inventory(tab);
+            await conn.Commands!.Reply($"Added stash tab {tab}: \"{stash.NameOf(tab)}\" ({stash.TypeOf(tab)}), {slot.Width} x {slot.Height}");
+        })
         .Add("adorned", "/adorned [0-1000] (dev: The Adorned unique jewel into the inventory, corrupted, for passive-jewel testing; the normal item range is 0-100)", async args =>
         {
             int percent = args.Length > 0 && int.TryParse(args[0], out int value) ? Math.Clamp(value, 0, 1000) : 100;
