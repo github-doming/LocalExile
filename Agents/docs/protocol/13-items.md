@@ -668,6 +668,19 @@ takes the item out of the store first, so two connections can never both get it.
 it is wiped like Auth's instance, once no connection has been in it for `InstanceRegistry.Lifetime` (6 minutes), and
 lost when the Gateway restarts.
 
+**The loot pet (dev)** (`LootPet.cs`: `PetPickUp`, `LootPetTakes`): a pet cosmetic worn in one of the Cosmetics tab's
+Pet slots (18, 19) takes ground items out of the instance on the player's tick (every 250 ms, [04](04-player-entity.md))
+into the main inventory, with the messages a click's pickup sends: 0x2bb for the object and 0xbf for the inventory, the
+stack merges included, and a quest item's flags and the tutorial's start weapon claimed as a click's pickup claims them.
+No 0x24 is sent and no walk happens, so walls and floors between the player and the item are ignored (a click's pickup
+does not). The radius is 60 cells (centre to centre) by default; `/loot_pet` sets it per character (1-200), turns the
+pickup on or off, and picks what it takes: `all` (every ground item; gold needs no room and goes through `PickUpGold`,
+which the player's own 15-cell auto-loot also uses), `valuable` (the `ValuableCurrency` orbs: Chaos Orb and better plus
+Chromatic Orbs and Gemcutter's Prisms) or `currency` (the Currency and StackableCurrency ItemClasses, the Delve
+resonators included). A full main inventory leaves an item on the ground, with one log line every 5 s. The character's
+own drops are left for a click for the rest of the area instance (`LootPetDropping`, `LootPetDroppedHere`). The settings
+live in the loaded game module: a module hot reload starts them over.
+
 ### Jeweller's Orb (initial local implementation, 2026-10-21)
 
 `CurrencyRerollSocketNumbers` uses the existing 0x71 handler and the shared Shift 0x72 path. One successful use

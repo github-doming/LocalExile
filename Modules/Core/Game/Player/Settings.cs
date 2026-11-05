@@ -48,9 +48,9 @@ static partial class Game
     // (traced live 2026-11-01, Frida), so the walk ends on the first cell within 21.
     internal const double PickupReach = 20;
     internal const int PickupTolerance = 1;
-    // How close (cells, centre to centre) the loot pet takes valuable currency off the ground (RunPlayerTick): a wide
-    // radius (the player's own click reach is 20) so a fight's drops are all taken; Items.PetPickUp ignores walls and
-    // floors between, as a click's pickup does not.
+    // How close (cells, centre to centre) the loot pet takes ground items off the ground (RunPlayerTick): a wide radius
+    // (the player's own click reach is 20) so a fight's drops are all taken; PetPickUp ignores walls and floors between, as
+    // a click's pickup does not. The per-character /loot_pet radius defaults to it.
     internal const double LootPetRadius = 60;
     // How close (cells, centre to centre) gold on the ground is picked up by itself (RunPlayerTick): our own number, a
     // little inside a click's PickupReach.
