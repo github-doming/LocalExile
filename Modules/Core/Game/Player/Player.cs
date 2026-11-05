@@ -592,16 +592,23 @@ static partial class Game
             }
             lock (conn.Monsters)
                 if (HardcoreProgressBlocked(conn)) continue;
-            // The loot pet (a worn pet cosmetic) takes valuable currency within its radius into the main inventory,
-            // unless a league system suppresses loot.
+            // The loot pet (a worn pet cosmetic) takes the ground items its mode allows within its radius into the main
+            // inventory, unless a league system suppresses loot.
             if (LootPetActive(conn) && GameEvents.AllowsLoot(conn))
-                foreach (var (id, currency) in conn.Instance.Ground.Within(at.X, at.Y, LootPetRadius, IsValuableCurrency))
-                {
-                    await PetPickUp(remote, stream, ciphers, conn, id, currency);
-                    if (!PlayerUpdatesCurrent(conn, updates)) return;
-                    lock (conn.Monsters)
-                        if (HardcoreProgressBlocked(conn)) break;
-                }
+            {
+                var pet = LootPetOf(conn);
+                if (pet.Enabled)
+                    foreach (var (id, ground) in conn.Instance.Ground.Within(at.X, at.Y, pet.Radius,
+                        g => LootPetTakes(ItemsFor(conn).ByHash(g.Item.TypeHash), pet.Mode)))
+                    {
+                        // What the character dropped here stays for a click, not for the pet (LootPetDropping).
+                        if (LootPetDroppedHere(conn, id, ground)) continue;
+                        await PetPickUp(remote, stream, ciphers, conn, id, ground);
+                        if (!PlayerUpdatesCurrent(conn, updates)) return;
+                        lock (conn.Monsters)
+                            if (HardcoreProgressBlocked(conn)) break;
+                    }
+            }
             // Quests that start when the player comes near a monster (a1q1: Hillock, "Kill Hillock").
             if (QuestsOf(conn).Watched(conn.Layout.Id) is { Count: > 0 } watched)
             {

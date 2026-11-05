@@ -635,7 +635,9 @@ static partial class Game
         }
         var (x, y) = conn.Walk.Position(conn.Clock.Elapsed.TotalSeconds);
         var ground = new WorldItemObject(x, y, held.Item);
+        LootPetDropping(conn, ground);
         uint id = conn.Instance.Ground.Add(ground, conn);
+        LootPetDropped(conn, id, ground);
         await Send(remote, stream, ciphers, InstanceEntities.CreateObject(id, InstanceEntities.ObjectTypeHash(WorldItemObject.MetadataPath), ground.Blob()),
             $"0x02b9 create world item 0x{id:x} at ({x}, {y})");
         await Send(remote, stream, ciphers, InstanceProtocol.EnterWakeZone(id), $"0x01a9 world item 0x{id:x} enters wake zone");
@@ -645,21 +647,7 @@ static partial class Game
     internal static async Task PickUpGroundItem(string remote, NetworkStream stream, ConnectionCiphers ciphers, ClientState conn, uint id, WorldItemObject ground,
         InstanceTransfer.UseSkillOnObject use, double requestedAt)
     {
-        // A quest item done with (its remove_flag set: a glyph after the placement, a Medicine Chest after Nessa has one, a
-        // copy left in another instance) is not needed any more: it goes, unpicked.
-        var questFlags = QuestFlagsOf(conn, ground.Item);
-        if (questFlags is not null && QuestItems.Removed(questFlags, f => ClientHasQuestFlag(conn, f)))
-        {
-            bool removed;
-            lock (conn.Monsters)
-            {
-                if (HardcoreProgressBlocked(conn)) return;
-                removed = conn.Instance.Ground.Take(id) is not null;
-            }
-            if (removed)
-                await Send(remote, stream, ciphers, InstanceProtocol.RemoveObject(id), $"0x02bb remove quest item 0x{id:x}: {questFlags.Remove} is set");
-            return;
-        }
+        if (await RemoveDoneQuestItem(remote, stream, ciphers, conn, id, ground)) return;
         if (!TryBeginObjectWalk(conn, requestedAt, ground.GridX, ground.GridY, PickupReach, out var objectWalk, centreRange: true, tolerance: PickupTolerance)) return;
         var (action, now, here, stop, arrive) = objectWalk;
         Console.WriteLine($"[gateway] {remote} <= 0x0024 pick up world item 0x{id:x} at ({ground.GridX}, {ground.GridY}) {use} from ({here.X}, {here.Y}): reached at ({stop.X}, {stop.Y}) in {arrive - now:0.00} s");
@@ -672,15 +660,41 @@ static partial class Game
                 $"0x01ab player picks up world item 0x{id:x}", still: () => PlayerActionCurrent(conn, action));
         if (arrive > now) await Task.Delay(TimeSpan.FromSeconds(arrive - now));
         if (!PlayerActionCurrent(conn, action)) return;
+        // With the inventory panel open the item goes to the cursor (when it is free), otherwise to the first free cell.
+        bool toCursor = (use.Flags & InstanceTransfer.InventoryOpenFlag) != 0 && ItemsOf(conn).Items(PlayerInventories.Cursor).Count == 0;
+        await CollectGroundItem(remote, stream, ciphers, conn, id, ground, toCursor, $"picked up from ({stop.X}, {stop.Y})");
+    }
+
+    // A quest item done with (its remove_flag set: a glyph after the placement, a Medicine Chest after Nessa has one, a
+    // copy left in another instance) is not needed any more: it goes, unpicked. True when the item was handled (removed,
+    // or a hardcore block stopped the connection from touching it): the caller is done with it either way.
+    internal static async Task<bool> RemoveDoneQuestItem(string remote, NetworkStream stream, ConnectionCiphers ciphers, ClientState conn, uint id, WorldItemObject ground)
+    {
+        var questFlags = QuestFlagsOf(conn, ground.Item);
+        if (questFlags is null || !QuestItems.Removed(questFlags, f => ClientHasQuestFlag(conn, f))) return false;
+        bool removed = false;
+        lock (conn.Monsters)
+        {
+            if (!HardcoreProgressBlocked(conn)) removed = conn.Instance.Ground.Take(id) is not null;
+        }
+        if (removed)
+            await Send(remote, stream, ciphers, InstanceProtocol.RemoveObject(id), $"0x02bb remove quest item 0x{id:x}: {questFlags.Remove} is set");
+        return true;
+    }
+
+    // The pickup a click's walk and the loot pet share: gold, a stack (onto the inventory's stacks of its type first) or a
+    // plain item in the first free cell (or the cursor, for a click with the inventory panel open); a quest item sets its
+    // flags and the tutorial's start weapon stops waiting; then the inventory messages. `how` names the pickup in the log.
+    internal static async Task CollectGroundItem(string remote, NetworkStream stream, ConnectionCiphers ciphers, ClientState conn,
+        uint id, WorldItemObject ground, bool toCursor, string how)
+    {
         if (IsGold(ground))
         {
-            await PickUpGold(remote, stream, ciphers, conn, id, ground, "picked up");
+            await PickUpGold(remote, stream, ciphers, conn, id, ground, how);
             return;
         }
         var items = ItemsOf(conn);
         var shape = ShapeOf(ground.Item) ?? new(1, 1, "");
-        // With the inventory panel open the item goes to the cursor (when it is free), otherwise to the first free cell.
-        bool toCursor = (use.Flags & InstanceTransfer.InventoryOpenFlag) != 0 && items.Items(PlayerInventories.Cursor).Count == 0;
         byte row = toCursor ? PlayerInventories.Cursor : PlayerInventories.MainInventory;
         if (!toCursor && shape.MaxStack > 1)
         {
@@ -712,11 +726,12 @@ static partial class Game
                 await Send(remote, stream, ciphers, InstanceEntities.CreateObject(restId, InstanceEntities.ObjectTypeHash(WorldItemObject.MetadataPath), rest.Blob()),
                     $"0x02b9 create world item 0x{restId:x} (the rest of 0x{id:x})");
             }
-            await Send(remote, stream, ciphers, InstanceProtocol.RemoveObject(id), $"0x02bb remove world item 0x{id:x} (picked up from ({stop.X}, {stop.Y}))");
+            await Send(remote, stream, ciphers, InstanceProtocol.RemoveObject(id), $"0x02bb remove world item 0x{id:x} ({how})");
             await Send(remote, stream, ciphers, InstanceItems.InventoryChange(PlayerInventories.InventoryId(row), items.NextRevision(row), stacked.RemovedIds, stacked.AddedItems),
                 $"0x00bf inventory 1: {ground.Item.StackSize} picked up ({stacked.Changed.Count} stack(s) grown, {stacked.Added.Count} new)");
             return;
         }
+        var questFlags = QuestFlagsOf(conn, ground.Item);
         InventoryItem? placed;
         List<string> pickupFlags;
         (byte X, byte Y) cell = (0, 0);
@@ -749,7 +764,7 @@ static partial class Game
                 return questFlags is not null ? QuestItems.Claim(CharacterName(conn), questFlags, Put) : Put();
             }, id);
         }
-        await Send(remote, stream, ciphers, InstanceProtocol.RemoveObject(id), $"0x02bb remove world item 0x{id:x} (picked up from ({stop.X}, {stop.Y}))");
+        await Send(remote, stream, ciphers, InstanceProtocol.RemoveObject(id), $"0x02bb remove world item 0x{id:x} ({how})");
         if (placed is null) return;
         await Send(remote, stream, ciphers, InstanceItems.InventoryChange(PlayerInventories.InventoryId(row), items.NextRevision(row), [], [placed]),
             toCursor ? $"0x00bf cursor: hold item {placed.Id}" : $"0x00bf inventory 1: add item {placed.Id} at ({cell.X}, {cell.Y})");
@@ -758,77 +773,6 @@ static partial class Game
     }
 
     internal static bool IsGold(WorldItemObject ground) => Items.ByHash(ground.Item.TypeHash)?.Class == ItemDrops.GoldClass;
-
-    // The loot pet's currency: the orbs worth taking on their own (Chaos Orb and better, plus the league orbs) and,
-    // by request, Chromatic Orbs and Gemcutter's Prisms. Cheap currency, fragments, divination cards on the ground and
-    // equipment are left alone. Ids are BaseItemTypes' (the comment names each one).
-    static readonly HashSet<string> ValuableCurrency =
-    [
-        "Metadata/Items/Currency/CurrencyRerollRare",            // Chaos Orb
-        "Metadata/Items/Currency/CurrencyRerollSocketColours",   // Chromatic Orb
-        "Metadata/Items/Currency/CurrencyGemQuality",            // Gemcutter's Prism
-        "Metadata/Items/Currency/CurrencyAddModToRare",          // Exalted Orb
-        "Metadata/Items/Currency/CurrencyRemoveMod",             // Orb of Annulment
-        "Metadata/Items/Currency/CurrencyModValues",             // Divine Orb
-        "Metadata/Items/Currency/CurrencyDuplicate",             // Mirror of Kalandra
-        "Metadata/Items/Currency/CurrencyFractureRare",          // Fracturing Orb
-        "Metadata/Items/Currency/CurrencyRerollUnique",          // Ancient Orb
-        "Metadata/Items/Currency/CurrencyHinekorasLock",         // Hinekora's Lock
-        "Metadata/Items/Currency/CurrencyMutatedAddModToRare",   // Foulborn Exalted Orb
-        "Metadata/Items/Currency/CurrencyHellscapeModValues",    // Volatile Vaal Orb
-        "Metadata/Items/Currency/CurrencyHellscapeRerollRare",   // Tainted Chaos Orb
-        "Metadata/Items/Currency/CurrencyHellscapeAddModToRare", // Tainted Exalted Orb
-        "Metadata/Items/Currency/CurrencyEldritchRerollRare",    // Eldritch Chaos Orb
-        "Metadata/Items/Currency/CurrencyEldritchAddModToRare",  // Eldritch Exalted Orb
-        "Metadata/Items/Currency/CurrencyEldritchRemoveMod",     // Eldritch Orb of Annulment
-        "Metadata/Items/Currency/CurrencyRerollRareVeiled",      // Veiled Exalted Orb
-        "Metadata/Items/Currency/CurrencyRerollRareVeiledChaos", // Veiled Chaos Orb
-        "Metadata/Items/Currency/CurrencyRerollDefences",        // Sacred Orb
-        "Metadata/Items/Currency/CurrencyAtlasPassiveRefund",    // Orb of Unmaking
-        "Metadata/Items/Currency/CurrencyUpgradeInfluenceMod",   // Orb of Dominance
-        "Metadata/Items/Currency/CurrencyUpgradeMapTier",        // Harbinger's Orb
-        "Metadata/Items/Currency/CurrencyRerollMapType",         // Orb of Horizons
-        "Metadata/Items/Currency/CurrencyAddAtlasModHigh",       // Awakened Sextant
-        "Metadata/Items/Currency/CurrencyAddAtlasModMaven",      // Elevated Sextant
-        "Metadata/Items/AtlasExiles/ApplyInfluence",             // Awakener's Orb
-        "Metadata/Items/DivinationCards/DivinationCardDeck",     // Stacked Deck
-    ];
-
-    /// <summary>A ground item the loot pet takes: one of the valuable currencies, whatever its class.</summary>
-    internal static bool IsValuableCurrency(WorldItemObject ground) =>
-        Items.ByHash(ground.Item.TypeHash) is { } t && ValuableCurrency.Contains(t.Id);
-
-    // The loot pet's pickup: the ground item goes into the main inventory the way a click's pickup puts it, without the
-    // walk or the cursor (RunPlayerTick calls it within a pet radius). With no room it stays on the ground; a partial
-    // stack that could not go in goes back on the ground rather than vanish.
-    internal static async Task PetPickUp(string remote, NetworkStream stream, ConnectionCiphers ciphers, ClientState conn, uint id, WorldItemObject ground)
-    {
-        var items = ItemsOf(conn);
-        PlayerInventories.Stacking stacked;
-        lock (conn.Monsters)
-        {
-            if (HardcoreProgressBlocked(conn)) return;
-            if (!items.Fits(PlayerInventories.MainInventory, ground.Item, ShapeOf))
-            {
-                Console.WriteLine($"[gateway] {remote} loot pet: no room for {ground.Item.StackSize} of 0x{ground.Item.TypeHash:x8}; it stays on the ground");
-                return;
-            }
-            if (conn.Instance.Ground.Take(id) is null) return;   // already picked up
-            stacked = KeepOnGroundIfNotSaved(conn, ground, () => items.AddStacked(PlayerInventories.MainInventory, ground.Item, ShapeOf), id);
-        }
-        if (stacked.Left > 0)
-        {
-            // Fits said yes, so this is not expected; the rest goes back on the ground rather than vanish.
-            var rest = new WorldItemObject(ground.GridX, ground.GridY, ground.Item with { StackSize = (ushort)stacked.Left });
-            uint restId = conn.Instance.Ground.Add(rest);
-            await Send(remote, stream, ciphers, InstanceEntities.CreateObject(restId, InstanceEntities.ObjectTypeHash(WorldItemObject.MetadataPath), rest.Blob()),
-                $"0x02b9 create world item 0x{restId:x} (the rest of 0x{id:x}, the loot pet)");
-        }
-        await Send(remote, stream, ciphers, InstanceProtocol.RemoveObject(id), $"0x02bb world item 0x{id:x} removed (the loot pet)");
-        await Send(remote, stream, ciphers, InstanceItems.InventoryChange(PlayerInventories.InventoryId(PlayerInventories.MainInventory),
-            items.NextRevision(PlayerInventories.MainInventory), stacked.RemovedIds, stacked.AddedItems),
-            $"0x00bf inventory 1: the loot pet picked up {ground.Item.StackSize} of 0x{ground.Item.TypeHash:x8}");
-    }
 
     // Gold goes to the stash's gold of the character's league (S→C 0x2a9), not into the inventory.
     internal static async Task PickUpGold(string remote, NetworkStream stream, ConnectionCiphers ciphers, ClientState conn, uint id, WorldItemObject ground, string how)

@@ -1973,6 +1973,22 @@ static class CommandsFeature
         {
             if (args.Length > 0) conn.AiEnabled = !args[0].Equals("off", StringComparison.OrdinalIgnoreCase);
             await conn.Commands!.Reply($"Monster AI is {(conn.AiEnabled ? "on" : "off")}.");
+        })
+        // The worn pet's automatic pickup (LootPet.cs): what it takes, whether it takes it and how far it reaches.
+        .Add("loot_pet", "/loot_pet [on|off | mode all|valuable|currency | radius <1-200>] (the worn pet's automatic pickup; without arguments, its state)", async args =>
+        {
+            switch (args)
+            {
+                case []: break;
+                case [var on] when on.Equals("on", StringComparison.OrdinalIgnoreCase): SetLootPetEnabled(conn, true); break;
+                case [var off] when off.Equals("off", StringComparison.OrdinalIgnoreCase): SetLootPetEnabled(conn, false); break;
+                case [var mode, var value] when mode.Equals("mode", StringComparison.OrdinalIgnoreCase): SetLootPetMode(conn, value); break;
+                case [var radius, var cells] when radius.Equals("radius", StringComparison.OrdinalIgnoreCase):
+                    SetLootPetRadius(conn, double.Parse(cells, System.Globalization.CultureInfo.InvariantCulture));
+                    break;
+                default: throw new ArgumentException("on, off, mode or radius");
+            }
+            await conn.Commands!.Reply(LootPetStatus(conn));
         });
     }
 }

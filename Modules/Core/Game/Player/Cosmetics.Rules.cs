@@ -18,8 +18,8 @@ static partial class Game
         return conn.WornCosmetics = Mtx.Equipped(worn);
     }
 
-    // The loot pet: a pet cosmetic worn in one of the Cosmetics tab's Pet slots (18, 19) takes valuable currency off the
-    // ground within LootPetRadius (RunPlayerTick, Items.PetPickUp). Any worn pet does it; without one nothing is taken.
+    // The loot pet: a pet cosmetic worn in one of the Cosmetics tab's Pet slots (18, 19) picks ground items up
+    // (RunPlayerTick, PetPickUp; /loot_pet sets what and how far). Any worn pet does it; without one nothing is taken.
     internal static bool LootPetActive(ClientState conn) =>
         WornCosmetics(conn).Any(w => w.Slot is 18 or 19 && MtxEffects.Of(w.MtxTypeHash) is { Pet: not 0 });
 
